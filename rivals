@@ -1,0 +1,777 @@
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- Güvenli GUI Katmanı
+local function GetSafeGuiParent()
+    local success, parent = pcall(function() return gethui() end)
+    if success and parent then return parent end
+    success, parent = pcall(function() return CoreGui end)
+    if success and parent then return parent end
+    return LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local SafeParent = GetSafeGuiParent()
+
+for _, v in pairs(SafeParent:GetChildren()) do
+    if v.Name == "ZypheraUI" or v.Name == "ZypheraVisuals" then v:Destroy() end
+end
+
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+_G.ZypheraLang = "TR" 
+
+-- ==========================================
+-- AYARLAR VE DEĞİŞKENLER
+-- ==========================================
+local Settings = {
+    Aimbot = false,
+    AimKey = Enum.UserInputType.MouseButton2,
+    ShowFOV = false,
+    FOVSize = 120,
+    Smoothness = 1,
+    MobileAimbotActive = false,
+    
+    ESPBox = false,
+    ESPHealth = false,
+    ESPName = false,
+    ESPDist = false,
+    ESPTracer = false,
+    MaxDistance = 500,
+    
+    SpeedEnabled = false,
+    SpeedValue = 50, 
+    JumpEnabled = false,
+    JumpValue = 100,
+    FlyEnabled = false,
+    FlySpeed = 50,
+
+    MenuKey = Enum.KeyCode.Insert,
+    ThemeColor = Color3.fromRGB(88, 101, 242)
+}
+
+local Aiming = false
+local CurrentTarget = nil
+local ThemedElements = { Bgs = {}, Texts = {}, Strokes = {} }
+
+-- ==========================================
+-- ANTI-TRIP (KARAKTER DONMASINI ÖNLER)
+-- ==========================================
+local function ApplyAntiTrip(char)
+    if not char then return end
+    local hum = char:WaitForChild("Humanoid", 3)
+    if hum then
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+    end
+end
+
+if LocalPlayer.Character then ApplyAntiTrip(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(function(char)
+    ApplyAntiTrip(char)
+    if Settings.FlyEnabled then task.wait(0.5); ToggleFly(true) end
+end)
+
+-- ==========================================
+-- DİL SÖZLÜĞÜ
+-- ==========================================
+local Translations = {
+    TR = {
+        Aimbot = "Aimbot", ESP = "ESP", Player = "Oyuncu", Settings = "Ayarlar", About = "Hakkında",
+        Title = "ZYPHERA RIVALS",
+        AimbotToggle = "Aimbot Aç/Kapat", AimKey = "Hedefleme Tuşu", LeftClick = "Sol Tık", RightClick = "Sağ Tık",
+        ShowFOV = "FOV Çemberini Göster", FOVSize = "FOV Boyutu", Smoothness = "Aimbot Sertliği",
+        MaxDistance = "Max ESP Mesafesi",
+        ESPBox = "Kutu (Hitbox)", ESPHealth = "Can Barı", ESPName = "İsim", ESPDist = "Mesafe", ESPTracer = "Çizgiler",
+        SpeedToggle = "Hız Hilesi (Velocity)", SpeedValue = "Hız Limiti",
+        JumpToggle = "Zıplama Gücü (Velocity)", JumpValue = "Zıplama Değeri",
+        FlyToggle = "Uçma (Kameraya Doğru)", FlySpeed = "Uçma Hızı",
+        MenuKeyLabel = "Menü Aç/Kapa Tuşu",
+        ThemePicker = "Tema Rengi Seçimi",
+        Developer = "Yapımcı:", MenuName = "Menü Adı:", Discord = "Zyphera Discord:",
+        Copy = "Kopyala", Copied = "Kopyalandı!", NotSupported = "Desteklenmiyor"
+    },
+    EN = {
+        Aimbot = "Aimbot", ESP = "ESP", Player = "Player", Settings = "Settings", About = "About",
+        Title = "ZYPHERA RIVALS",
+        AimbotToggle = "Toggle Aimbot", AimKey = "Aim Keybind", LeftClick = "Left Click", RightClick = "Right Click",
+        ShowFOV = "Show FOV", FOVSize = "FOV Size", Smoothness = "Smoothness",
+        MaxDistance = "Max ESP Distance",
+        ESPBox = "Hitbox", ESPHealth = "Health Bar", ESPName = "Names", ESPDist = "Distance", ESPTracer = "Tracers",
+        SpeedToggle = "Speed Hack (Velocity)", SpeedValue = "Speed Limit",
+        JumpToggle = "Jump Hack (Velocity)", JumpValue = "Jump Power",
+        FlyToggle = "Fly (Camera Direction)", FlySpeed = "Fly Speed",
+        MenuKeyLabel = "Menu Toggle Key",
+        ThemePicker = "Theme Color Selection",
+        Developer = "Developer:", MenuName = "Menu Name:", Discord = "Zyphera Discord:",
+        Copy = "Copy", Copied = "Copied!", NotSupported = "Not Supported"
+    }
+}
+
+local function ApplyThemeColor()
+    local color = Settings.ThemeColor
+    for _, obj in pairs(ThemedElements.Bgs) do obj.BackgroundColor3 = color end
+    for _, obj in pairs(ThemedElements.Texts) do obj.TextColor3 = color end
+    for _, obj in pairs(ThemedElements.Strokes) do obj.Color = color end
+end
+
+-- ==========================================
+-- GÖRSEL (VISUALS) GUI KATMANI
+-- ==========================================
+local VisualsGui = Instance.new("ScreenGui")
+VisualsGui.Name = "ZypheraVisuals"
+VisualsGui.IgnoreGuiInset = true
+VisualsGui.Parent = SafeParent
+VisualsGui.ResetOnSpawn = false
+
+local FOVFrame = Instance.new("Frame")
+FOVFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVFrame.BackgroundTransparency = 1
+FOVFrame.Visible = false
+FOVFrame.Parent = VisualsGui
+local FOVCorner = Instance.new("UICorner") FOVCorner.CornerRadius = UDim.new(1, 0) FOVCorner.Parent = FOVFrame
+local FOVStroke = Instance.new("UIStroke") FOVStroke.Color = Color3.fromRGB(255, 255, 255) FOVStroke.Thickness = 1.5 FOVStroke.Parent = FOVFrame
+
+local function UpdateFOV()
+    FOVFrame.Size = UDim2.new(0, Settings.FOVSize * 2, 0, Settings.FOVSize * 2)
+    FOVFrame.Visible = Settings.ShowFOV and Settings.Aimbot
+    if isMobile then
+        FOVFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    else
+        local mousePos = UserInputService:GetMouseLocation()
+        FOVFrame.Position = UDim2.new(0, mousePos.X, 0, mousePos.Y)
+    end
+end
+
+-- ==========================================
+-- FLY MOTORU
+-- ==========================================
+local FlyVelo = nil
+
+function ToggleFly(state)
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") or not char:FindFirstChild("Humanoid") then return end
+    
+    local hrp = char.HumanoidRootPart
+    local hum = char.Humanoid
+
+    if state then
+        if FlyVelo then FlyVelo:Destroy() end
+        FlyVelo = Instance.new("BodyVelocity")
+        FlyVelo.MaxForce = Vector3.new(100000, 100000, 100000)
+        FlyVelo.Velocity = Vector3.zero
+        FlyVelo.Parent = hrp
+    else
+        if FlyVelo then FlyVelo:Destroy(); FlyVelo = nil end
+        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+    end
+end
+
+-- ==========================================
+-- ORTAK FONKSİYON: EN YAKIN OYUNCUYU BUL
+-- ==========================================
+local function GetClosestPlayer()
+    local closestDist = Settings.FOVSize
+    local closestPlayer = nil
+    local mouseLocation = UserInputService:GetMouseLocation()
+    local center = isMobile and Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2) or Vector2.new(mouseLocation.X, mouseLocation.Y)
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+            local root = player.Character:FindFirstChild("HumanoidRootPart")
+            local hum = player.Character:FindFirstChild("Humanoid")
+            if hum and hum.Health > 0 and root then
+                local worldDist = (Camera.CFrame.Position - root.Position).Magnitude
+                if worldDist <= Settings.MaxDistance then
+                    local pos, onScreen = Camera:WorldToViewportPoint(player.Character.Head.Position)
+                    if onScreen then
+                        local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                        if dist <= closestDist then
+                            closestDist = dist
+                            closestPlayer = player
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+-- ==========================================
+-- ESP MOTORU 
+-- ==========================================
+local ESPObjects = {}
+
+local function CreateESP(player)
+    if ESPObjects[player] then return end
+    local esp = {}
+    esp.Box = Instance.new("Frame") esp.Box.BackgroundTransparency = 1 esp.Box.Visible = false esp.Box.Parent = VisualsGui
+    local BoxStroke = Instance.new("UIStroke") BoxStroke.Color = Settings.ThemeColor BoxStroke.Thickness = 1.5 BoxStroke.Parent = esp.Box
+    table.insert(ThemedElements.Strokes, BoxStroke)
+    
+    esp.HealthBg = Instance.new("Frame") esp.HealthBg.BackgroundColor3 = Color3.fromRGB(0,0,0) esp.HealthBg.BorderSizePixel = 0 esp.HealthBg.Visible = false esp.HealthBg.Parent = VisualsGui
+    esp.HealthBar = Instance.new("Frame") esp.HealthBar.BackgroundColor3 = Color3.fromRGB(0, 255, 0) esp.HealthBar.BorderSizePixel = 0 esp.HealthBar.Parent = esp.HealthBg
+    
+    esp.Name = Instance.new("TextLabel") esp.Name.BackgroundTransparency = 1 esp.Name.TextColor3 = Color3.fromRGB(255,255,255) esp.Name.Font = Enum.Font.GothamBold esp.Name.TextSize = 12 esp.Name.Visible = false esp.Name.Parent = VisualsGui
+    local NameStroke = Instance.new("UIStroke") NameStroke.Color = Color3.fromRGB(0,0,0) NameStroke.Thickness = 1 NameStroke.Parent = esp.Name
+    
+    esp.Dist = Instance.new("TextLabel") esp.Dist.BackgroundTransparency = 1 esp.Dist.TextColor3 = Color3.fromRGB(200,200,200) esp.Dist.Font = Enum.Font.Gotham esp.Dist.TextSize = 11 esp.Dist.Visible = false esp.Dist.Parent = VisualsGui
+    local DistStroke = Instance.new("UIStroke") DistStroke.Color = Color3.fromRGB(0,0,0) DistStroke.Thickness = 1 DistStroke.Parent = esp.Dist
+    
+    esp.Tracer = Instance.new("Frame") esp.Tracer.BackgroundColor3 = Settings.ThemeColor esp.Tracer.AnchorPoint = Vector2.new(0.5, 0.5) esp.Tracer.BorderSizePixel = 0 esp.Tracer.Visible = false esp.Tracer.Parent = VisualsGui
+    table.insert(ThemedElements.Bgs, esp.Tracer)
+    
+    ESPObjects[player] = esp
+end
+
+local function RemoveESP(player)
+    if ESPObjects[player] then for _, obj in pairs(ESPObjects[player]) do obj:Destroy() end ESPObjects[player] = nil end
+end
+
+Players.PlayerAdded:Connect(CreateESP)
+Players.PlayerRemoving:Connect(RemoveESP)
+for _, p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer then CreateESP(p) end end
+
+local function HideESP(esp) esp.Box.Visible = false esp.HealthBg.Visible = false esp.Name.Visible = false esp.Dist.Visible = false esp.Tracer.Visible = false end
+
+local function UpdateESP()
+    for player, esp in pairs(ESPObjects) do
+        local char = player.Character
+        local isAlive = char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Head")
+        
+        if isAlive and (Settings.ESPBox or Settings.ESPHealth or Settings.ESPName or Settings.ESPDist or Settings.ESPTracer) then
+            local distance = math.floor((Camera.CFrame.Position - char.HumanoidRootPart.Position).Magnitude)
+            if distance <= Settings.MaxDistance then
+                local rootPos, onScreen = Camera:WorldToViewportPoint(char.HumanoidRootPart.Position)
+                if onScreen then
+                    local headPos = Camera:WorldToViewportPoint(char.Head.Position + Vector3.new(0, 0.5, 0))
+                    local legPos = Camera:WorldToViewportPoint(char.HumanoidRootPart.Position - Vector3.new(0, 3, 0))
+                    local height = math.abs(headPos.Y - legPos.Y)
+                    local width = height * 0.6
+                    local healthPerc = char.Humanoid.Health / char.Humanoid.MaxHealth
+                    
+                    if Settings.ESPBox then esp.Box.Size = UDim2.new(0, width, 0, height) esp.Box.Position = UDim2.new(0, rootPos.X - width/2, 0, headPos.Y) esp.Box.Visible = true else esp.Box.Visible = false end
+                    if Settings.ESPHealth then esp.HealthBg.Size = UDim2.new(0, 3, 0, height) esp.HealthBg.Position = UDim2.new(0, rootPos.X - width/2 - 6, 0, headPos.Y) esp.HealthBar.Size = UDim2.new(1, 0, healthPerc, 0) esp.HealthBar.Position = UDim2.new(0, 0, 1 - healthPerc, 0) esp.HealthBar.BackgroundColor3 = Color3.fromHSV(healthPerc * 0.3, 1, 1) esp.HealthBg.Visible = true else esp.HealthBg.Visible = false end
+                    if Settings.ESPName then esp.Name.Text = player.Name esp.Name.Position = UDim2.new(0, rootPos.X, 0, headPos.Y - 15) esp.Name.Visible = true else esp.Name.Visible = false end
+                    if Settings.ESPDist then esp.Dist.Text = tostring(distance) .. "m" esp.Dist.Position = UDim2.new(0, rootPos.X, 0, headPos.Y + height + 5) esp.Dist.Visible = true else esp.Dist.Visible = false end
+                    if Settings.ESPTracer then
+                        local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                        local targetPos = Vector2.new(rootPos.X, rootPos.Y)
+                        esp.Tracer.Size = UDim2.new(0, (targetPos - screenCenter).Magnitude, 0, 1.5)
+                        esp.Tracer.Position = UDim2.new(0, (screenCenter.X + targetPos.X) / 2, 0, (screenCenter.Y + targetPos.Y) / 2)
+                        esp.Tracer.Rotation = math.deg(math.atan2(targetPos.Y - screenCenter.Y, targetPos.X - screenCenter.X))
+                        esp.Tracer.Visible = true
+                    else esp.Tracer.Visible = false end
+                else HideESP(esp) end
+            else HideESP(esp) end
+        else HideESP(esp) end
+    end
+end
+
+-- ==========================================
+-- ANA MENÜ SİSTEMİ
+-- ==========================================
+local function LoadMainMenu()
+    local T = Translations[_G.ZypheraLang]
+
+    local MainGui = Instance.new("ScreenGui")
+    MainGui.Name = "ZypheraUI" MainGui.Parent = SafeParent MainGui.ResetOnSpawn = false
+
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Size = isMobile and UDim2.new(0.8, 0, 0.75, 0) or UDim2.new(0, 520, 0, 380)
+    MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0) MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18) MainFrame.ClipsDescendants = true MainFrame.Active = true MainFrame.Draggable = true MainFrame.Parent = MainGui
+
+    local MainCorner = Instance.new("UICorner") MainCorner.CornerRadius = UDim.new(0, 10) MainCorner.Parent = MainFrame
+    local MainStroke = Instance.new("UIStroke") MainStroke.Color = Settings.ThemeColor MainStroke.Thickness = 2 MainStroke.Parent = MainFrame
+    table.insert(ThemedElements.Strokes, MainStroke)
+
+    local Topbar = Instance.new("Frame") Topbar.Size = UDim2.new(1, 0, 0, 45) Topbar.BackgroundColor3 = Color3.fromRGB(20, 20, 25) Topbar.Parent = MainFrame
+    local TopbarCorner = Instance.new("UICorner") TopbarCorner.CornerRadius = UDim.new(0, 10) TopbarCorner.Parent = Topbar
+
+    local TitleLabel = Instance.new("TextLabel") TitleLabel.Size = UDim2.new(1, -20, 1, 0) TitleLabel.Position = UDim2.new(0, 20, 0, 0) TitleLabel.BackgroundTransparency = 1 TitleLabel.Text = T.Title TitleLabel.TextColor3 = Settings.ThemeColor TitleLabel.Font = Enum.Font.GothamBlack TitleLabel.TextSize = 20 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left TitleLabel.Parent = Topbar
+    table.insert(ThemedElements.Texts, TitleLabel)
+
+    local CloseBtn = Instance.new("TextButton") CloseBtn.Size = UDim2.new(0, 30, 0, 30) CloseBtn.Position = UDim2.new(1, -40, 0.5, -15) CloseBtn.BackgroundColor3 = Color3.fromRGB(255, 70, 70) CloseBtn.Text = "X" CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255) CloseBtn.Font = Enum.Font.GothamBold CloseBtn.Parent = Topbar
+    local CloseCorner = Instance.new("UICorner") CloseCorner.CornerRadius = UDim.new(0, 8) CloseCorner.Parent = CloseBtn
+    CloseBtn.MouseButton1Click:Connect(function() MainFrame.Visible = false end)
+
+    local TabContainer = Instance.new("Frame") TabContainer.Size = UDim2.new(1, -20, 0, 35) TabContainer.Position = UDim2.new(0, 10, 0, 55) TabContainer.BackgroundTransparency = 1 TabContainer.Parent = MainFrame
+    local TabLayout = Instance.new("UIListLayout") TabLayout.FillDirection = Enum.FillDirection.Horizontal TabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center TabLayout.Padding = UDim.new(0, 8) TabLayout.Parent = TabContainer
+
+    local PageContainer = Instance.new("Frame") PageContainer.Size = UDim2.new(1, -20, 1, -105) PageContainer.Position = UDim2.new(0, 10, 0, 100) PageContainer.BackgroundTransparency = 1 PageContainer.Parent = MainFrame
+
+    local Pages = {}
+    local TabButtons = {}
+
+    local function CreateTab(name, title)
+        local TabBtn = Instance.new("TextButton") TabBtn.Size = UDim2.new(0, 85, 1, 0) TabBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30) TabBtn.Text = title TabBtn.TextColor3 = Color3.fromRGB(200, 200, 200) TabBtn.Font = Enum.Font.GothamBold TabBtn.TextSize = 13 TabBtn.Parent = TabContainer
+        local TabCorner = Instance.new("UICorner") TabCorner.CornerRadius = UDim.new(0, 8) TabCorner.Parent = TabBtn
+
+        local Page = Instance.new("ScrollingFrame")
+        Page.Size = UDim2.new(1, 0, 1, 0) 
+        Page.BackgroundTransparency = 1 
+        Page.ScrollBarThickness = 2 
+        Page.Visible = false 
+        Page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        Page.CanvasSize = UDim2.new(0, 0, 0, 0)
+        Page.Parent = PageContainer
+        
+        local PageLayout = Instance.new("UIListLayout") PageLayout.Padding = UDim.new(0, 8) PageLayout.Parent = Page
+
+        Pages[name] = Page TabButtons[name] = TabBtn
+
+        TabBtn.MouseButton1Click:Connect(function()
+            for k, p in pairs(Pages) do p.Visible = (k == name) end
+            for k, b in pairs(TabButtons) do 
+                if k == name then
+                    b.BackgroundColor3 = Settings.ThemeColor
+                    b.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    table.insert(ThemedElements.Bgs, b)
+                else
+                    b.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+                    b.TextColor3 = Color3.fromRGB(200, 200, 200)
+                    for i, v in ipairs(ThemedElements.Bgs) do if v == b then table.remove(ThemedElements.Bgs, i) end end
+                end
+            end
+        end)
+        return Page
+    end
+
+    local AimbotPage = CreateTab("Aimbot", T.Aimbot)
+    local ESPPage = CreateTab("ESP", T.ESP)
+    local PlayerPage = CreateTab("Player", T.Player)
+    local SettingsPage = CreateTab("Settings", T.Settings)
+    local AboutPage = CreateTab("About", T.About)
+    
+    Pages["Aimbot"].Visible = true
+    TabButtons["Aimbot"].BackgroundColor3 = Settings.ThemeColor
+    table.insert(ThemedElements.Bgs, TabButtons["Aimbot"])
+
+    -- UI Fonksiyonları
+    local function CreateToggle(page, text, default, callback)
+        local Frame = Instance.new("Frame") Frame.Size = UDim2.new(1, 0, 0, 40) Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30) Frame.Parent = page
+        local Corner = Instance.new("UICorner") Corner.CornerRadius = UDim.new(0, 8) Corner.Parent = Frame
+        local Label = Instance.new("TextLabel") Label.Size = UDim2.new(1, -70, 1, 0) Label.Position = UDim2.new(0, 15, 0, 0) Label.BackgroundTransparency = 1 Label.Text = text Label.TextColor3 = Color3.fromRGB(220, 220, 220) Label.Font = Enum.Font.GothamBold Label.TextSize = 14 Label.TextXAlignment = Enum.TextXAlignment.Left Label.Parent = Frame
+        local Btn = Instance.new("TextButton") Btn.Size = UDim2.new(0, 50, 0, 26) Btn.Position = UDim2.new(1, -65, 0.5, -13) Btn.BackgroundColor3 = default and Settings.ThemeColor or Color3.fromRGB(45, 45, 55) Btn.Text = "" Btn.Parent = Frame
+        local BtnCorner = Instance.new("UICorner") BtnCorner.CornerRadius = UDim.new(1, 0) BtnCorner.Parent = Btn
+        local Circle = Instance.new("Frame") Circle.Size = UDim2.new(0, 20, 0, 20) Circle.Position = UDim2.new(default and 1 or 0, default and -23 or 3, 0.5, -10) Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255) Circle.Parent = Btn
+        local CircleCorner = Instance.new("UICorner") CircleCorner.CornerRadius = UDim.new(1, 0) CircleCorner.Parent = Circle
+
+        if default then table.insert(ThemedElements.Bgs, Btn) end
+
+        local state = default
+        Btn.MouseButton1Click:Connect(function()
+            state = not state
+            if state then table.insert(ThemedElements.Bgs, Btn) else for i, v in ipairs(ThemedElements.Bgs) do if v == Btn then table.remove(ThemedElements.Bgs, i) end end end
+            TweenService:Create(Btn, TweenInfo.new(0.2), {BackgroundColor3 = state and Settings.ThemeColor or Color3.fromRGB(45, 45, 55)}):Play()
+            TweenService:Create(Circle, TweenInfo.new(0.2), {Position = UDim2.new(state and 1 or 0, state and -23 or 3, 0.5, -10)}):Play()
+            callback(state)
+        end)
+    end
+
+    local function CreateSlider(page, text, min, max, default, isFloat, callback)
+        local Frame = Instance.new("Frame") Frame.Size = UDim2.new(1, 0, 0, 55) Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30) Frame.Parent = page
+        local Corner = Instance.new("UICorner") Corner.CornerRadius = UDim.new(0, 8) Corner.Parent = Frame
+        local Label = Instance.new("TextLabel") Label.Size = UDim2.new(1, -30, 0, 25) Label.Position = UDim2.new(0, 15, 0, 5) Label.BackgroundTransparency = 1 Label.Text = text .. ": " .. default Label.TextColor3 = Color3.fromRGB(220, 220, 220) Label.Font = Enum.Font.GothamBold Label.TextSize = 13 Label.TextXAlignment = Enum.TextXAlignment.Left Label.Parent = Frame
+        local SliderBg = Instance.new("Frame") SliderBg.Size = UDim2.new(1, -30, 0, 6) SliderBg.Position = UDim2.new(0, 15, 0, 35) SliderBg.BackgroundColor3 = Color3.fromRGB(45, 45, 55) SliderBg.Parent = Frame
+        local BgCorner = Instance.new("UICorner") BgCorner.CornerRadius = UDim.new(1, 0) BgCorner.Parent = SliderBg
+        local Fill = Instance.new("Frame") Fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0) Fill.BackgroundColor3 = Settings.ThemeColor Fill.Parent = SliderBg
+        local FillCorner = Instance.new("UICorner") FillCorner.CornerRadius = UDim.new(1, 0) FillCorner.Parent = Fill
+        table.insert(ThemedElements.Bgs, Fill)
+
+        local Knob = Instance.new("Frame") Knob.Size = UDim2.new(0, 14, 0, 14) Knob.Position = UDim2.new(1, -7, 0.5, -7) Knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255) Knob.Parent = Fill
+        local KnobCorner = Instance.new("UICorner") KnobCorner.CornerRadius = UDim.new(1, 0) KnobCorner.Parent = Knob
+        local Btn = Instance.new("TextButton") Btn.Size = UDim2.new(1, 0, 1, 20) Btn.Position = UDim2.new(0, 0, 0.5, -10) Btn.BackgroundTransparency = 1 Btn.Text = "" Btn.Parent = SliderBg
+
+        local dragging = false
+        local function Update(inputX)
+            local relX = math.clamp(inputX - SliderBg.AbsolutePosition.X, 0, SliderBg.AbsoluteSize.X)
+            local percent = relX / SliderBg.AbsoluteSize.X
+            Fill.Size = UDim2.new(percent, 0, 1, 0)
+            local val = min + percent * (max - min)
+            val = isFloat and (math.floor(val * 100) / 100) or math.floor(val)
+            Label.Text = text .. ": " .. val
+            callback(val)
+        end
+
+        Btn.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = true; Update(input.Position.X) end end)
+        UserInputService.InputChanged:Connect(function(input) if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then Update(input.Position.X) end end)
+        UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
+    end
+
+    local function CreateSelector(page, text, opt1, val1, opt2, val2, default, callback)
+        local Frame = Instance.new("Frame") Frame.Size = UDim2.new(1, 0, 0, 45) Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30) Frame.Parent = page
+        local Corner = Instance.new("UICorner") Corner.CornerRadius = UDim.new(0, 8) Corner.Parent = Frame
+        local Label = Instance.new("TextLabel") Label.Size = UDim2.new(0.4, 0, 1, 0) Label.Position = UDim2.new(0, 15, 0, 0) Label.BackgroundTransparency = 1 Label.Text = text Label.TextColor3 = Color3.fromRGB(220, 220, 220) Label.Font = Enum.Font.GothamBold Label.TextSize = 14 Label.TextXAlignment = Enum.TextXAlignment.Left Label.Parent = Frame
+
+        local B1 = Instance.new("TextButton") B1.Size = UDim2.new(0.25, 0, 0, 30) B1.Position = UDim2.new(0.45, 0, 0.5, -15) B1.BackgroundColor3 = (default == val1) and Settings.ThemeColor or Color3.fromRGB(45, 45, 55) B1.Text = opt1 B1.TextColor3 = Color3.fromRGB(255, 255, 255) B1.Font = Enum.Font.GothamBold B1.TextSize = 12 B1.Parent = Frame
+        local B1C = Instance.new("UICorner") B1C.CornerRadius = UDim.new(0, 6) B1C.Parent = B1
+        if default == val1 then table.insert(ThemedElements.Bgs, B1) end
+
+        local B2 = Instance.new("TextButton") B2.Size = UDim2.new(0.25, 0, 0, 30) B2.Position = UDim2.new(0.72, 0, 0.5, -15) B2.BackgroundColor3 = (default == val2) and Settings.ThemeColor or Color3.fromRGB(45, 45, 55) B2.Text = opt2 B2.TextColor3 = Color3.fromRGB(255, 255, 255) B2.Font = Enum.Font.GothamBold B2.TextSize = 12 B2.Parent = Frame
+        local B2C = Instance.new("UICorner") B2C.CornerRadius = UDim.new(0, 6) B2C.Parent = B2
+        if default == val2 then table.insert(ThemedElements.Bgs, B2) end
+
+        B1.MouseButton1Click:Connect(function()
+            B1.BackgroundColor3 = Settings.ThemeColor B2.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+            table.insert(ThemedElements.Bgs, B1)
+            for i, v in ipairs(ThemedElements.Bgs) do if v == B2 then table.remove(ThemedElements.Bgs, i) end end
+            callback(val1)
+        end)
+        B2.MouseButton1Click:Connect(function()
+            B2.BackgroundColor3 = Settings.ThemeColor B1.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+            table.insert(ThemedElements.Bgs, B2)
+            for i, v in ipairs(ThemedElements.Bgs) do if v == B1 then table.remove(ThemedElements.Bgs, i) end end
+            callback(val2)
+        end)
+    end
+
+    local function CreateKeybind(page, text, defaultKey, callback)
+        local Frame = Instance.new("Frame") Frame.Size = UDim2.new(1, 0, 0, 40) Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30) Frame.Parent = page
+        local Corner = Instance.new("UICorner") Corner.CornerRadius = UDim.new(0, 8) Corner.Parent = Frame
+        local Label = Instance.new("TextLabel") Label.Size = UDim2.new(1, -100, 1, 0) Label.Position = UDim2.new(0, 15, 0, 0) Label.BackgroundTransparency = 1 Label.Text = text Label.TextColor3 = Color3.fromRGB(220, 220, 220) Label.Font = Enum.Font.GothamBold Label.TextSize = 14 Label.TextXAlignment = Enum.TextXAlignment.Left Label.Parent = Frame
+        
+        local Btn = Instance.new("TextButton") Btn.Size = UDim2.new(0, 80, 0, 26) Btn.Position = UDim2.new(1, -95, 0.5, -13) Btn.BackgroundColor3 = Color3.fromRGB(45, 45, 55) Btn.Text = defaultKey.Name Btn.TextColor3 = Color3.fromRGB(255,255,255) Btn.Font = Enum.Font.GothamBold Btn.TextSize = 12 Btn.Parent = Frame
+        local BtnCorner = Instance.new("UICorner") BtnCorner.CornerRadius = UDim.new(0, 6) BtnCorner.Parent = Btn
+        
+        Btn.MouseButton1Click:Connect(function()
+            Btn.Text = "..."
+            local conn
+            conn = UserInputService.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.Keyboard then
+                    callback(input.KeyCode)
+                    Btn.Text = input.KeyCode.Name
+                    conn:Disconnect()
+                end
+            end)
+        end)
+    end
+
+    local function CreateColorPicker(page, text, defaultColor, callback)
+        local h, s, v = defaultColor:ToHSV()
+        local Frame = Instance.new("Frame") Frame.Size = UDim2.new(1, 0, 0, 230) Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30) Frame.Parent = page
+        local Corner = Instance.new("UICorner") Corner.CornerRadius = UDim.new(0, 8) Corner.Parent = Frame
+        
+        local Label = Instance.new("TextLabel") Label.Size = UDim2.new(1, -30, 0, 25) Label.Position = UDim2.new(0, 15, 0, 5) Label.BackgroundTransparency = 1 Label.Text = text Label.TextColor3 = Color3.fromRGB(220, 220, 220) Label.Font = Enum.Font.GothamBold Label.TextSize = 14 Label.TextXAlignment = Enum.TextXAlignment.Left Label.Parent = Frame
+
+        local SVBox = Instance.new("Frame") SVBox.Size = UDim2.new(1, -30, 0, 120) SVBox.Position = UDim2.new(0, 15, 0, 30) SVBox.BackgroundColor3 = Color3.fromHSV(h, 1, 1) SVBox.Parent = Frame
+        local SVCorner = Instance.new("UICorner") SVCorner.CornerRadius = UDim.new(0, 6) SVCorner.Parent = SVBox
+        
+        local WhiteGradFrame = Instance.new("Frame") WhiteGradFrame.Size = UDim2.new(1, 0, 1, 0) WhiteGradFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255) WhiteGradFrame.Parent = SVBox
+        local WhiteCorner = Instance.new("UICorner") WhiteCorner.CornerRadius = UDim.new(0, 6) WhiteCorner.Parent = WhiteGradFrame
+        local WhiteGrad = Instance.new("UIGradient") WhiteGrad.Transparency = NumberSequence.new{NumberSequenceKeypoint.new(0,0), NumberSequenceKeypoint.new(1,1)} WhiteGrad.Parent = WhiteGradFrame
+
+        local BlackGradFrame = Instance.new("Frame") BlackGradFrame.Size = UDim2.new(1, 0, 1, 0) BlackGradFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0) BlackGradFrame.BackgroundTransparency = 0 BlackGradFrame.Parent = SVBox
+        local BlackCorner = Instance.new("UICorner") BlackCorner.CornerRadius = UDim.new(0, 6) BlackCorner.Parent = BlackGradFrame
+        local BlackGrad = Instance.new("UIGradient") BlackGrad.Transparency = NumberSequence.new{NumberSequenceKeypoint.new(0,1), NumberSequenceKeypoint.new(1,0)} BlackGrad.Rotation = 90 BlackGrad.Parent = BlackGradFrame
+
+        local SVKnob = Instance.new("Frame") SVKnob.Size = UDim2.new(0, 12, 0, 12) SVKnob.AnchorPoint = Vector2.new(0.5, 0.5) SVKnob.Position = UDim2.new(s, 0, 1 - v, 0) SVKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255) SVKnob.Parent = SVBox
+        local SVKnobCorner = Instance.new("UICorner") SVKnobCorner.CornerRadius = UDim.new(1, 0) SVKnobCorner.Parent = SVKnob
+        local SVKnobStroke = Instance.new("UIStroke") SVKnobStroke.Color = Color3.fromRGB(0, 0, 0) SVKnobStroke.Thickness = 1.5 SVKnobStroke.Parent = SVKnob
+
+        local HueBox = Instance.new("Frame") HueBox.Size = UDim2.new(1, -30, 0, 15) HueBox.Position = UDim2.new(0, 15, 0, 160) HueBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255) HueBox.Parent = Frame
+        local HueCorner = Instance.new("UICorner") HueCorner.CornerRadius = UDim.new(1, 0) HueCorner.Parent = HueBox
+        local HueGrad = Instance.new("UIGradient") 
+        HueGrad.Color = ColorSequence.new{
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)), ColorSequenceKeypoint.new(0.167, Color3.fromRGB(255, 255, 0)),
+            ColorSequenceKeypoint.new(0.333, Color3.fromRGB(0, 255, 0)), ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 255)),
+            ColorSequenceKeypoint.new(0.667, Color3.fromRGB(0, 0, 255)), ColorSequenceKeypoint.new(0.833, Color3.fromRGB(255, 0, 255)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))
+        } HueGrad.Parent = HueBox
+
+        local HueKnob = Instance.new("Frame") HueKnob.Size = UDim2.new(0, 8, 0, 18) HueKnob.AnchorPoint = Vector2.new(0.5, 0.5) HueKnob.Position = UDim2.new(h, 0, 0.5, 0) HueKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255) HueKnob.Parent = HueBox
+        local HueKnobCorner = Instance.new("UICorner") HueKnobCorner.CornerRadius = UDim.new(1, 0) HueKnobCorner.Parent = HueKnob
+        local HueKnobStroke = Instance.new("UIStroke") HueKnobStroke.Color = Color3.fromRGB(0, 0, 0) HueKnobStroke.Thickness = 1.5 HueKnobStroke.Parent = HueKnob
+
+        local HexBox = Instance.new("TextBox") HexBox.Size = UDim2.new(1, -30, 0, 32) HexBox.Position = UDim2.new(0, 15, 0, 185) HexBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25) HexBox.Text = "#" .. defaultColor:ToHex() HexBox.TextColor3 = Color3.fromRGB(255, 255, 255) HexBox.Font = Enum.Font.GothamBold HexBox.TextSize = 14 HexBox.ClearTextOnFocus = false HexBox.Parent = Frame
+        local HexCorner = Instance.new("UICorner") HexCorner.CornerRadius = UDim.new(0, 6) HexCorner.Parent = HexBox
+        local HexStroke = Instance.new("UIStroke") HexStroke.Color = Settings.ThemeColor HexStroke.Thickness = 1.5 HexStroke.Parent = HexBox
+        table.insert(ThemedElements.Strokes, HexStroke)
+
+        local function UpdateColor()
+            local color = Color3.fromHSV(h, s, v)
+            SVBox.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+            HexBox.Text = "#" .. color:ToHex()
+            callback(color)
+        end
+
+        local svDragging = false
+        local function UpdateSV(input)
+            s = math.clamp((input.Position.X - SVBox.AbsolutePosition.X) / SVBox.AbsoluteSize.X, 0, 1)
+            v = 1 - math.clamp((input.Position.Y - SVBox.AbsolutePosition.Y) / SVBox.AbsoluteSize.Y, 0, 1)
+            SVKnob.Position = UDim2.new(s, 0, 1 - v, 0)
+            UpdateColor()
+        end
+
+        local hueDragging = false
+        local function UpdateHue(input)
+            h = math.clamp((input.Position.X - HueBox.AbsolutePosition.X) / HueBox.AbsoluteSize.X, 0, 1)
+            HueKnob.Position = UDim2.new(h, 0, 0.5, 0)
+            UpdateColor()
+        end
+
+        local SVBtn = Instance.new("TextButton") SVBtn.Size = UDim2.new(1,0,1,0) SVBtn.BackgroundTransparency = 1 SVBtn.Text = "" SVBtn.Parent = SVBox
+        SVBtn.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then svDragging = true; UpdateSV(input) end end)
+        
+        local HueBtn = Instance.new("TextButton") HueBtn.Size = UDim2.new(1,0,1,0) HueBtn.BackgroundTransparency = 1 HueBtn.Text = "" HueBtn.Parent = HueBox
+        HueBtn.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then hueDragging = true; UpdateHue(input) end end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                if svDragging then UpdateSV(input) elseif hueDragging then UpdateHue(input) end
+            end
+        end)
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                svDragging = false hueDragging = false
+            end
+        end)
+
+        HexBox.FocusLost:Connect(function()
+            local text = HexBox.Text
+            if not string.match(text, "^#") then text = "#" .. text end
+            local success, color = pcall(function() return Color3.fromHex(text) end)
+            if success then
+                h, s, v = color:ToHSV()
+                SVKnob.Position = UDim2.new(s, 0, 1 - v, 0)
+                HueKnob.Position = UDim2.new(h, 0, 0.5, 0)
+                UpdateColor()
+            else
+                HexBox.Text = "#" .. Color3.fromHSV(h, s, v):ToHex()
+            end
+        end)
+    end
+
+    -- AIMBOT SEKMESİ
+    CreateToggle(AimbotPage, T.AimbotToggle, Settings.Aimbot, function(val) Settings.Aimbot = val; UpdateFOV() end)
+    if not isMobile then CreateSelector(AimbotPage, T.AimKey, T.LeftClick, Enum.UserInputType.MouseButton1, T.RightClick, Enum.UserInputType.MouseButton2, Settings.AimKey, function(val) Settings.AimKey = val end) end
+    CreateToggle(AimbotPage, T.ShowFOV, Settings.ShowFOV, function(val) Settings.ShowFOV = val; UpdateFOV() end)
+    CreateSlider(AimbotPage, T.FOVSize, 30, 400, Settings.FOVSize, false, function(val) Settings.FOVSize = val; UpdateFOV() end)
+    CreateSlider(AimbotPage, T.Smoothness, 0.1, 1, Settings.Smoothness, true, function(val) Settings.Smoothness = val end)
+    
+    -- ESP SEKMESİ
+    CreateToggle(ESPPage, T.ESPBox, Settings.ESPBox, function(val) Settings.ESPBox = val end)
+    CreateToggle(ESPPage, T.ESPHealth, Settings.ESPHealth, function(val) Settings.ESPHealth = val end)
+    CreateToggle(ESPPage, T.ESPName, Settings.ESPName, function(val) Settings.ESPName = val end)
+    CreateToggle(ESPPage, T.ESPDist, Settings.ESPDist, function(val) Settings.ESPDist = val end)
+    CreateToggle(ESPPage, T.ESPTracer, Settings.ESPTracer, function(val) Settings.ESPTracer = val end)
+    CreateSlider(ESPPage, T.MaxDistance, 100, 3000, Settings.MaxDistance, false, function(val) Settings.MaxDistance = val end)
+    
+    -- OYUNCU (PLAYER) SEKMESİ
+    CreateToggle(PlayerPage, T.SpeedToggle, Settings.SpeedEnabled, function(val) Settings.SpeedEnabled = val end)
+    CreateSlider(PlayerPage, T.SpeedValue, 16, 250, Settings.SpeedValue, false, function(val) Settings.SpeedValue = val end)
+    CreateToggle(PlayerPage, T.JumpToggle, Settings.JumpEnabled, function(val) Settings.JumpEnabled = val end)
+    CreateSlider(PlayerPage, T.JumpValue, 50, 300, Settings.JumpValue, false, function(val) Settings.JumpValue = val end)
+    CreateToggle(PlayerPage, T.FlyToggle, Settings.FlyEnabled, function(val) Settings.FlyEnabled = val; ToggleFly(val) end)
+    CreateSlider(PlayerPage, T.FlySpeed, 10, 300, Settings.FlySpeed, false, function(val) Settings.FlySpeed = val end)
+
+    -- AYARLAR SEKMESİ
+    if not isMobile then CreateKeybind(SettingsPage, T.MenuKeyLabel, Settings.MenuKey, function(key) Settings.MenuKey = key end) end
+    CreateColorPicker(SettingsPage, T.ThemePicker, Settings.ThemeColor, function(color) 
+        Settings.ThemeColor = color
+        ApplyThemeColor() 
+    end)
+
+    -- HAKKINDA (ABOUT) SEKMESİ
+    local AboutLayout = Instance.new("UIListLayout")
+    AboutLayout.Padding = UDim.new(0, 10)
+    AboutLayout.Parent = AboutPage
+
+    local function CreateInfoLabel(text)
+        local Frame = Instance.new("Frame") Frame.Size = UDim2.new(1, 0, 0, 40) Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30) Frame.Parent = AboutPage
+        local Corner = Instance.new("UICorner") Corner.CornerRadius = UDim.new(0, 8) Corner.Parent = Frame
+        local Label = Instance.new("TextLabel") Label.Size = UDim2.new(1, -30, 1, 0) Label.Position = UDim2.new(0, 15, 0, 0) Label.BackgroundTransparency = 1 Label.Text = text Label.TextColor3 = Color3.fromRGB(220, 220, 220) Label.Font = Enum.Font.GothamBold Label.TextSize = 14 Label.TextXAlignment = Enum.TextXAlignment.Left Label.Parent = Frame
+    end
+
+    CreateInfoLabel(T.Developer .. " ffumut - Shadzy")
+    CreateInfoLabel(T.MenuName .. " Zyphera Rivals")
+
+    local DiscordFrame = Instance.new("Frame") DiscordFrame.Size = UDim2.new(1, 0, 0, 45) DiscordFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30) DiscordFrame.Parent = AboutPage
+    local DiscordCorner = Instance.new("UICorner") DiscordCorner.CornerRadius = UDim.new(0, 8) DiscordCorner.Parent = DiscordFrame
+
+    local DiscordLabel = Instance.new("TextLabel") DiscordLabel.Size = UDim2.new(0.6, 0, 1, 0) DiscordLabel.Position = UDim2.new(0, 15, 0, 0) DiscordLabel.BackgroundTransparency = 1 DiscordLabel.Text = T.Discord DiscordLabel.TextColor3 = Color3.fromRGB(220, 220, 220) DiscordLabel.Font = Enum.Font.GothamBold DiscordLabel.TextSize = 14 DiscordLabel.TextXAlignment = Enum.TextXAlignment.Left DiscordLabel.Parent = DiscordFrame
+
+    local CopyBtn = Instance.new("TextButton") CopyBtn.Size = UDim2.new(0, 110, 0, 30) CopyBtn.Position = UDim2.new(1, -125, 0.5, -15) CopyBtn.BackgroundColor3 = Settings.ThemeColor CopyBtn.Text = T.Copy CopyBtn.TextColor3 = Color3.fromRGB(255, 255, 255) CopyBtn.Font = Enum.Font.GothamBold CopyBtn.TextSize = 12 CopyBtn.Parent = DiscordFrame
+    table.insert(ThemedElements.Bgs, CopyBtn)
+    local CopyBtnCorner = Instance.new("UICorner") CopyBtnCorner.CornerRadius = UDim.new(0, 6) CopyBtnCorner.Parent = CopyBtn
+
+    CopyBtn.MouseButton1Click:Connect(function()
+        if setclipboard then
+            setclipboard("https://discord.gg/gGbM5k8Vva")
+            CopyBtn.Text = T.Copied
+            task.wait(2)
+            CopyBtn.Text = T.Copy
+        else
+            CopyBtn.Text = T.NotSupported
+            task.wait(2)
+            CopyBtn.Text = T.Copy
+        end
+    end)
+
+    -- PC MENÜ AÇ/KAPA 
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == Settings.MenuKey then MainFrame.Visible = not MainFrame.Visible end
+    end)
+
+    -- MOBİL HUD BUTONLARI (SADECE MENÜ VE AIMBOT KALDI)
+    if isMobile then
+        local function CreateMobileHudBtn(text, yPos, color)
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(0, 45, 0, 45)
+            btn.Position = UDim2.new(0, 10, 0, yPos)
+            btn.BackgroundColor3 = color
+            btn.Text = text
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            btn.Font = Enum.Font.GothamBlack
+            btn.TextSize = 18
+            btn.Parent = MainGui
+            local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(1, 0) corner.Parent = btn
+            local stroke = Instance.new("UIStroke") stroke.Color = Color3.fromRGB(255, 255, 255) stroke.Thickness = 2 stroke.Parent = btn
+            return btn
+        end
+
+        local ToggleMenuBtn = CreateMobileHudBtn("Z", 10, Settings.ThemeColor)
+        table.insert(ThemedElements.Bgs, ToggleMenuBtn)
+        ToggleMenuBtn.MouseButton1Click:Connect(function() MainFrame.Visible = not MainFrame.Visible end)
+
+        local MobileAimBtn = CreateMobileHudBtn("🎯", 70, Color3.fromRGB(45, 45, 55))
+        MobileAimBtn.TextSize = 24
+        MobileAimBtn.MouseButton1Click:Connect(function()
+            if not Settings.Aimbot then return end 
+            Settings.MobileAimbotActive = not Settings.MobileAimbotActive
+            if Settings.MobileAimbotActive then
+                Aiming = true
+                MobileAimBtn.BackgroundColor3 = Settings.ThemeColor
+                table.insert(ThemedElements.Bgs, MobileAimBtn)
+            else
+                Aiming = false
+                CurrentTarget = nil
+                MobileAimBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+                for i, v in ipairs(ThemedElements.Bgs) do if v == MobileAimBtn then table.remove(ThemedElements.Bgs, i) end end
+            end
+        end)
+    end
+end
+
+-- ==========================================
+-- ZIPLAMA (JUMP) OVERRIDE MOTORU
+-- ==========================================
+UserInputService.JumpRequest:Connect(function()
+    if Settings.JumpEnabled then
+        local char = LocalPlayer.Character
+        if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
+            local hum = char.Humanoid
+            if hum:GetState() ~= Enum.HumanoidStateType.Freefall then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                char.HumanoidRootPart.Velocity = Vector3.new(char.HumanoidRootPart.Velocity.X, Settings.JumpValue, char.HumanoidRootPart.Velocity.Z)
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- OYUNCU (HIZ, FLY) FİZİK MOTORU DÖNGÜSÜ
+-- ==========================================
+RunService.Heartbeat:Connect(function()
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("Humanoid") and char:FindFirstChild("HumanoidRootPart") then
+        local hum = char.Humanoid
+        local hrp = char.HumanoidRootPart
+        
+        if Settings.SpeedEnabled and hum.MoveDirection.Magnitude > 0 then
+            hrp.Velocity = Vector3.new(hum.MoveDirection.X * Settings.SpeedValue, hrp.Velocity.Y, hum.MoveDirection.Z * Settings.SpeedValue)
+        end
+        
+        if Settings.FlyEnabled and FlyVelo then
+            local moveDir = hum.MoveDirection
+            if moveDir.Magnitude > 0 then
+                local cam = workspace.CurrentCamera
+                local flatLook = Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z).Unit
+                local flatRight = Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z).Unit
+                
+                local dotF = flatLook:Dot(moveDir)
+                local dotR = flatRight:Dot(moveDir)
+                
+                local flyDir = (cam.CFrame.LookVector * dotF) + (cam.CFrame.RightVector * dotR)
+                FlyVelo.Velocity = flyDir.Unit * Settings.FlySpeed
+            else
+                FlyVelo.Velocity = Vector3.zero
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- AIMBOT VE ESP GÜNCELLEME DÖNGÜSÜ
+-- ==========================================
+if not isMobile then
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if Settings.Aimbot and input.UserInputType == Settings.AimKey then Aiming = true; CurrentTarget = GetClosestPlayer() end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Settings.AimKey then Aiming = false; CurrentTarget = nil end
+    end)
+end
+
+RunService:BindToRenderStep("ZypheraAim", Enum.RenderPriority.Camera.Value + 1, function()
+    UpdateFOV()
+
+    if Aiming and Settings.Aimbot then
+        if isMobile and CurrentTarget == nil then CurrentTarget = GetClosestPlayer() end
+        if CurrentTarget and CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("Head") then
+            local hum = CurrentTarget.Character:FindFirstChild("Humanoid")
+            if hum and hum.Health > 0 then
+                local head = CurrentTarget.Character.Head
+                if isMobile then
+                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, head.Position)
+                else
+                    local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                    if onScreen then
+                        if mousemoverel then
+                            local mouseLocation = UserInputService:GetMouseLocation()
+                            mousemoverel((pos.X - mouseLocation.X) * Settings.Smoothness, (pos.Y - mouseLocation.Y) * Settings.Smoothness)
+                        else
+                            Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, head.Position), Settings.Smoothness)
+                        end
+                    end
+                end
+            else CurrentTarget = nil end
+        end
+    end
+
+    UpdateESP() 
+end)
+
+-- ==========================================
+-- DİL SEÇİM EKRANI
+-- ==========================================
+local LangGui = Instance.new("ScreenGui") LangGui.Name = "ZypheraUI" LangGui.Parent = SafeParent LangGui.ResetOnSpawn = false
+local Overlay = Instance.new("Frame") Overlay.Size = UDim2.new(1, 0, 1, 0) Overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0) Overlay.BackgroundTransparency = 0.4 Overlay.Parent = LangGui
+local LangFrame = Instance.new("Frame") LangFrame.Size = isMobile and UDim2.new(0.7, 0, 0, 120) or UDim2.new(0, 320, 0, 140) LangFrame.Position = UDim2.new(0.5, 0, 0.5, 0) LangFrame.AnchorPoint = Vector2.new(0.5, 0.5) LangFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25) LangFrame.Parent = Overlay
+local LangCorner = Instance.new("UICorner") LangCorner.CornerRadius = UDim.new(0, 12) LangCorner.Parent = LangFrame
+local LangStroke = Instance.new("UIStroke") LangStroke.Color = Settings.ThemeColor LangStroke.Thickness = 1.5 LangStroke.Parent = LangFrame
+local LangTitle = Instance.new("TextLabel") LangTitle.Size = UDim2.new(1, 0, 0, 50) LangTitle.Position = UDim2.new(0, 0, 0, 5) LangTitle.BackgroundTransparency = 1 LangTitle.Text = "Dil // Language" LangTitle.TextColor3 = Color3.fromRGB(255, 255, 255) LangTitle.Font = Enum.Font.GothamBold LangTitle.TextSize = isMobile and 15 or 18 LangTitle.Parent = LangFrame
+local BtnContainer = Instance.new("Frame") BtnContainer.Size = UDim2.new(1, -40, 0, 40) BtnContainer.Position = UDim2.new(0, 20, 1, -55) BtnContainer.BackgroundTransparency = 1 BtnContainer.Parent = LangFrame
+local TrBtn = Instance.new("TextButton") TrBtn.Size = UDim2.new(0.48, 0, 1, 0) TrBtn.Position = UDim2.new(0, 0, 0, 0) TrBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45) TrBtn.Text = "Türkçe" TrBtn.TextColor3 = Color3.fromRGB(255, 255, 255) TrBtn.Font = Enum.Font.GothamBold TrBtn.TextSize = 13 TrBtn.Parent = BtnContainer
+local TrBtnCorner = Instance.new("UICorner") TrBtnCorner.CornerRadius = UDim.new(0, 8) TrBtnCorner.Parent = TrBtn
+local EnBtn = Instance.new("TextButton") EnBtn.Size = UDim2.new(0.48, 0, 1, 0) EnBtn.Position = UDim2.new(0.52, 0, 0, 0) EnBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45) EnBtn.Text = "English" EnBtn.TextColor3 = Color3.fromRGB(255, 255, 255) EnBtn.Font = Enum.Font.GothamBold EnBtn.TextSize = 13 EnBtn.Parent = BtnContainer
+local EnBtnCorner = Instance.new("UICorner") EnBtnCorner.CornerRadius = UDim.new(0, 8) EnBtnCorner.Parent = EnBtn
+
+local function SelectLanguage(lang)
+    _G.ZypheraLang = lang
+    TweenService:Create(LangFrame, TweenInfo.new(0.3), {Size = UDim2.new(0,0,0,0)}):Play()
+    TweenService:Create(Overlay, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+    task.wait(0.3)
+    LangGui:Destroy()
+    LoadMainMenu()
+end
+
+TrBtn.MouseButton1Click:Connect(function() SelectLanguage("TR") end)
+EnBtn.MouseButton1Click:Connect(function() SelectLanguage("EN") end)
